@@ -301,11 +301,29 @@ export class SessionRuntime {
     }
   }
 
-  startWatch(jsonlPath: string, follow = false): void {
+  startWatch(sessionId: string, follow = false): void {
     this.stopWatch();
     this.watchIsFollow = follow;
-    this.watcher = new TailWatcher(jsonlPath, (entries) => void this.onWatchEntries(entries));
-    this.watcher.start(true);
+    if (this.store.mode === "db") {
+      this.watchFromDb(sessionId);
+    } else {
+      const path = this.store.jsonlPath(sessionId);
+      this.watcher = new TailWatcher(path, (entries) => void this.onWatchEntries(entries));
+      this.watcher.start(true);
+    }
+  }
+
+  private watchFromDb(sessionId: string): void {
+    let lastId = "";
+    const tick = 2000;
+    const timer = setInterval(() => {
+      const entries = this.store.readHistorySince(sessionId, lastId, 20);
+      if (entries.length > 0) {
+        lastId = entries[entries.length - 1]!.timestamp ? String(entries[entries.length - 1]!.timestamp) : lastId;
+        void this.onWatchEntries(entries);
+      }
+    }, tick);
+    this.watcher = { start: () => {}, stop: () => clearInterval(timer), running: true } as TailWatcher;
   }
 
   stopWatch(): boolean {

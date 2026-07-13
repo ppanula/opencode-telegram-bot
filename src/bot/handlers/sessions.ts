@@ -126,7 +126,7 @@ export function registerSessions(bot: Bot, deps: BotDeps): void {
     await ctx.answerCallbackQuery();
     const meta = deps.store.get(id);
     const rt = deps.registry.get(ctx.chat!.id);
-    rt.startWatch(deps.store.jsonlPath(id));
+    rt.startWatch(id);
     await ctx.reply(
       `\u{1F4E1} Watching live: ${meta?.title ?? id.slice(0, 8)}\nNew activity streams here. Send /unwatch to stop.`,
     );

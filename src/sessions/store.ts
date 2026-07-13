@@ -52,7 +52,7 @@ export class SessionStore {
 
   constructor(
     sessionsDir: string,
-    private readonly dbPath: string,
+    readonly dbPath: string,
     /** PID of the bot's own OpenCode process — sessions locked by it are
      *  active because the ACP agent is serving them in-process. */
     private readonly getAcpPid: () => number | undefined,
@@ -118,6 +118,12 @@ export class SessionStore {
   readFirstPrompt(sessionId: string): string {
     if (this.mode === "db") return readFirstPromptFromDb(this.dbPath, sessionId);
     return readFirstPromptFromFs(join(this.sessionsDir, `${sessionId}.jsonl`));
+  }
+
+  /** Read messages created after a timestamp (for live watch in DB mode). */
+  readHistorySince(sessionId: string, sinceTimestamp: string, maxEntries: number): HistoryEntry[] {
+    if (this.mode !== "db") return [];
+    return readHistorySinceDb(this.dbPath, sessionId, sinceTimestamp, maxEntries);
   }
 
   // ── SQLite backend ────────────────────────────────────────────────────────
@@ -377,6 +383,62 @@ function readFirstPromptFromDb(dbPath: string, sessionId: string): string {
   } catch (e) {
     log.warn("db readFirstPrompt failed:", (e as Error).message);
     return "";
+  } finally {
+    db?.close();
+  }
+}
+
+function readHistorySinceDb(
+  dbPath: string,
+  sessionId: string,
+  sinceTimestamp: string,
+  maxEntries: number,
+): HistoryEntry[] {
+  let db: Database | undefined;
+  try {
+    db = openDb(dbPath);
+    const since = sinceTimestamp ? Number(sinceTimestamp) : 0;
+    const rows = db.prepare(
+      `SELECT m.data
+       FROM message m
+       WHERE m.session_id = ?
+         AND m.time_created > ?
+       ORDER BY m.time_created ASC
+       LIMIT ?`,
+    ).all<{ data: string }>(sessionId, since, maxEntries * 3);
+
+    const entries: HistoryEntry[] = [];
+    for (const row of rows) {
+      const msgData = parseJson(row.data);
+      if (!msgData) continue;
+
+      const role = roleFromDb(msgData.role);
+      if (!role) continue;
+
+      let text = "";
+      if (Array.isArray(msgData.content)) {
+        text = (msgData.content as Array<{ type?: string; text?: string }>)
+          .filter((c) => c && (c.type === "text" || c.type === "reasoning"))
+          .map((c) => c.text ?? "")
+          .join("");
+      }
+
+      if (!text && !msgData.tool_call_name && !msgData.name) continue;
+
+      entries.push({
+        role,
+        text: text || `(${msgData.tool_call_name || msgData.name || "unknown"})`,
+        tool: (msgData.tool_call_name as string) || (msgData.name as string),
+        timestamp: msgData.time ? (msgData.time as { created?: number }).created : undefined,
+      });
+
+      if (entries.length >= maxEntries) break;
+    }
+
+    return entries;
+  } catch (e) {
+    log.warn("db readHistorySince failed:", (e as Error).message);
+    return [];
   } finally {
     db?.close();
   }
