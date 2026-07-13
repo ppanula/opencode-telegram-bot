@@ -392,13 +392,12 @@ function buildEntriesFromRows(
 
     if (row.part_data) {
       const partData = parseJson(row.part_data);
-      if (partData && typeof partData.text === "string") {
+      if (partData && typeof partData.text === "string" && partData.text.trim()) {
         const partType = partData.type as string | undefined;
-        if (partType === "text" || partType === "reasoning" || !partType) {
+        if (partType === "text" || partType === "reasoning") {
           msg.texts.push(partData.text);
         }
       }
-      // Store tool info from tool parts
       if (partData?.type === "tool" && (partData.tool as Record<string, unknown>)?.name && !msg.tool) {
         msg.tool = (partData.tool as Record<string, unknown>).name as string;
       }
@@ -410,8 +409,10 @@ function buildEntriesFromRows(
     .sort(([, a], [, b]) => a.ts - b.ts);
 
   for (const [, msg] of sorted) {
-    const text = msg.texts.join("");
+    const text = msg.texts.join("").trim();
     if (!text && !msg.tool) continue;
+    // Skip entries with no real content (e.g., step-start/finish markers)
+    if (!text && msg.tool && msg.role === "assistant") continue;
 
     entries.push({
       role: msg.role as HistoryEntry["role"],
