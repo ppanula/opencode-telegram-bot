@@ -11,6 +11,7 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { createRequire } from "node:module";
 import { createLogger } from "../logger.js";
 import type { HistoryEntry, SessionMeta } from "./types.js";
 import { readHistory as readHistoryFromFs, readFirstPrompt as readFirstPromptFromFs } from "./history.js";
@@ -278,10 +279,9 @@ interface Database {
 }
 
 function openDb(path: string): Database {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const require = createRequire(import.meta.url);
   const BetterSqlite3 = require("better-sqlite3") as
-    | (new (path: string, opts?: { readonly?: boolean }) => Database)
-    | undefined;
+    (new (path: string, opts?: { readonly?: boolean }) => Database) | undefined;
 
   if (!BetterSqlite3) {
     throw new Error(
