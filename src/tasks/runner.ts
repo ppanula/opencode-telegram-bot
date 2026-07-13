@@ -1,8 +1,11 @@
 /**
  * Executes a scheduled task: opens a fresh session in the task's project,
- * sends the prompt, and streams the response live to the chat via
- * ResponseStreamer — just like an interactive turn. Runs independently
- * of the user's interactive session.
+ * sends the prompt, and delivers the result to the chat.
+ *
+ * When `taskLiveStream` is on (default), the turn streams live via
+ * ResponseStreamer — thinking, tool cards, and prose appear in real-time,
+ * just like an interactive turn. When off, the old v2.0.0 behaviour is used:
+ * output is collected silently and sent as a single message on completion.
  */
 import type { Api } from "grammy";
 import { basename } from "node:path";
@@ -26,6 +29,13 @@ export class TaskRunner {
 
   /** Run a task; resolves true on success, false on error. */
   async run(task: Task): Promise<boolean> {
+    if (this.cfg.taskLiveStream) return this.runLive(task);
+    return this.runSilent(task);
+  }
+
+  // ── Live-streaming mode (taskLiveStream=true, default) ──────────────────
+
+  private async runLive(task: Task): Promise<boolean> {
     log.info(`running task "${task.name}" in ${task.projectPath}`);
     let sessionId = "";
 
@@ -35,7 +45,7 @@ export class TaskRunner {
       this.api,
       task.chatId,
       this.cfg.streamThrottleMs,
-      undefined,  // no replyTo — tasks start their own thread
+      undefined,
       `\u23F0 **Task:** ${task.name} \u00B7 ${project}`,
     );
 
@@ -91,6 +101,58 @@ export class TaskRunner {
       log.error(`task "${task.name}" failed:`, (err as Error).message);
       return false;
     }
+  }
+
+  // ── Silent mode (taskLiveStream=false, v2.0.0 behaviour) ────────────────
+
+  private async runSilent(task: Task): Promise<boolean> {
+    log.info(`running task "${task.name}" in ${task.projectPath} (silent)`);
+    let sessionId = "";
+    let text = "";
+    let tools = 0;
+    const seen = new Set<string>();
+
+    const listener = (sid: string, u: SessionUpdate): void => {
+      if (sid !== sessionId) return;
+      if (u.sessionUpdate === "agent_message_chunk" && typeof u.content?.text === "string") {
+        text += u.content.text;
+      } else if (u.sessionUpdate === "tool_call") {
+        const id = u.toolCallId || u.title || String(tools);
+        if (!seen.has(id)) {
+          seen.add(id);
+          tools++;
+        }
+      }
+    };
+
+    try {
+      sessionId = await this.acp.newSession(task.projectPath);
+      if (task.agent) {
+        try {
+          await this.acp.setMode(sessionId, task.agent);
+        } catch {
+          /* best-effort */
+        }
+      }
+      this.acp.on("session-update", listener);
+      await this.acp.prompt(sessionId, [{ type: "text", text: task.prompt }]);
+      this.acp.off("session-update", listener);
+      await this.deliver(task, text, tools);
+      return true;
+    } catch (err) {
+      this.acp.off("session-update", listener);
+      await this.deliverError(task, (err as Error).message);
+      log.error(`task "${task.name}" failed:`, (err as Error).message);
+      return false;
+    }
+  }
+
+  private async deliver(task: Task, text: string, tools: number): Promise<void> {
+    const project = task.projectName || basename(task.projectPath);
+    const body = text.trim() || "_(no text output)_";
+    const footer = tools > 0 ? `\n\n\u{1F527} ${tools} tool call(s)` : "";
+    const header = `\u23F0 **Task: ${task.name}** \u00B7 ${project}`;
+    await sendMarkdownDoc(this.api, task.chatId, `${header}\n\n${body}${footer}`, { loud: true });
   }
 
   private async deliverError(task: Task, message: string): Promise<void> {

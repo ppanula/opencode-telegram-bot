@@ -145,6 +145,10 @@ export interface AppConfig {
    *  ghost/duplicate holding the lock is terminated so the fresh process (with
    *  the current `.env`) is the only Telegram getUpdates consumer. */
   singleInstance: boolean;
+  /** Stream scheduled task output live to Telegram (thinking, tool cards,
+   *  progress) as the task runs. When false, only the final result is sent
+   *  — same as the v2.0.0 behaviour. */
+  taskLiveStream: boolean;
 }
 
 export function loadConfig(): AppConfig {
@@ -217,6 +221,7 @@ export function loadConfig(): AppConfig {
     autoUpdate: bool(process.env.AUTO_UPDATE, true),
     updateCheckMs: num(process.env.UPDATE_CHECK_MS, 3_600_000),
     singleInstance: bool(process.env.OPENCODE_TG_SINGLE_INSTANCE, true),
+    taskLiveStream: bool(process.env.TASK_LIVE_STREAM, false),
   };
 
   return cfg;
