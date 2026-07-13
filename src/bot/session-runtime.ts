@@ -1028,7 +1028,7 @@ export class SessionRuntime {
       .map((e) => {
         const icon = WATCH_ICON[e.role] ?? "\u2022";
         if (e.role === "tool") return `${icon} ${e.tool ? `\`${e.tool}\`` : "tool"}`;
-        const text = e.text.length > WATCH_ENTRY_MAX ? e.text.slice(0, WATCH_ENTRY_MAX) + " …" : e.text;
+        const text = e.text.length > WATCH_ENTRY_MAX ? "… " + e.text.slice(-WATCH_ENTRY_MAX) : e.text;
         return `${icon} ${text}`;
       })
       .filter(Boolean)
