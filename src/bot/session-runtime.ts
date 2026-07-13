@@ -316,10 +316,13 @@ export class SessionRuntime {
   private watchFromDb(sessionId: string): void {
     let lastId = "";
     const tick = 2000;
+    log.info(`watchFromDb starting for session ${sessionId.slice(0, 12)}`);
     const timer = setInterval(() => {
       const entries = this.store.readHistorySince(sessionId, lastId, 20);
       if (entries.length > 0) {
+        const prev = lastId;
         lastId = entries[entries.length - 1]!.timestamp ? String(entries[entries.length - 1]!.timestamp) : lastId;
+        log.info(`watch: got ${entries.length} entries for ${sessionId.slice(0, 12)}`);
         void this.onWatchEntries(entries);
       }
     }, tick);

@@ -312,77 +312,22 @@ function readHistoryFromDb(
   try {
     db = openDb(dbPath);
     const rows = db.prepare(
-      `SELECT m.data
+      `SELECT m.id as msg_id, m.data as msg_data, m.time_created,
+              p.data as part_data
        FROM message m
+       LEFT JOIN part p ON p.message_id = m.id
        WHERE m.session_id = ?
-       ORDER BY m.time_created DESC
+       ORDER BY m.time_created DESC, p.time_created ASC
        LIMIT ?`,
-    ).all<{ data: string }>(sessionId, maxEntries * 3);
+    ).all<{ msg_id: string; msg_data: string; time_created: number; part_data: string | null }>(
+      sessionId,
+      maxEntries * 30, // oversample — one message can have many parts
+    );
 
-    const entries: HistoryEntry[] = [];
-    for (let i = rows.length - 1; i >= 0; i--) {
-      const msgData = parseJson(rows[i]!.data);
-      if (!msgData) continue;
-
-      const role = roleFromDb(msgData.role);
-      if (!role) continue;
-
-      let text = "";
-      if (Array.isArray(msgData.content)) {
-        text = (msgData.content as Array<{ type?: string; text?: string }>)
-          .filter((c) => c && (c.type === "text" || c.type === "reasoning"))
-          .map((c) => c.text ?? "")
-          .join("");
-      }
-
-      if (!text && !msgData.tool_call_name && !msgData.name) continue;
-
-      entries.push({
-        role,
-        text: text || `(${msgData.tool_call_name || msgData.name || "unknown"})`,
-        tool: (msgData.tool_call_name as string) || (msgData.name as string),
-        timestamp: msgData.time ? (msgData.time as { created?: number }).created : undefined,
-      });
-
-      if (entries.length >= maxEntries) break;
-    }
-
-    return entries;
+    return buildEntriesFromRows(rows, maxEntries);
   } catch (e) {
     log.warn("db readHistory failed:", (e as Error).message);
     return [];
-  } finally {
-    db?.close();
-  }
-}
-
-function readFirstPromptFromDb(dbPath: string, sessionId: string): string {
-  let db: Database | undefined;
-  try {
-    db = openDb(dbPath);
-    const row = db.prepare(
-      `SELECT m.data FROM message m
-       WHERE m.session_id = ?
-         AND json_extract(m.data, '$.role') = 'user'
-       ORDER BY m.time_created ASC
-       LIMIT 1`,
-    ).get<{ data: string }>(sessionId);
-    if (!row) return "";
-
-    const msgData = parseJson(row.data);
-    if (!msgData) return "";
-
-    if (Array.isArray(msgData.content)) {
-      return (msgData.content as Array<{ type?: string; text?: string }>)
-        .filter((c) => c && c.type === "text")
-        .map((c) => c.text ?? "")
-        .join("")
-        .trim();
-    }
-    return "";
-  } catch (e) {
-    log.warn("db readFirstPrompt failed:", (e as Error).message);
-    return "";
   } finally {
     db?.close();
   }
@@ -399,46 +344,113 @@ function readHistorySinceDb(
     db = openDb(dbPath);
     const since = sinceTimestamp ? Number(sinceTimestamp) : 0;
     const rows = db.prepare(
-      `SELECT m.data
+      `SELECT m.id as msg_id, m.data as msg_data, m.time_created,
+              p.data as part_data
        FROM message m
+       LEFT JOIN part p ON p.message_id = m.id
        WHERE m.session_id = ?
          AND m.time_created > ?
-       ORDER BY m.time_created ASC
+       ORDER BY m.time_created ASC, p.time_created ASC
        LIMIT ?`,
-    ).all<{ data: string }>(sessionId, since, maxEntries * 3);
+    ).all<{ msg_id: string; msg_data: string; time_created: number; part_data: string | null }>(
+      sessionId,
+      since,
+      maxEntries * 30,
+    );
 
-    const entries: HistoryEntry[] = [];
-    for (const row of rows) {
-      const msgData = parseJson(row.data);
-      if (!msgData) continue;
-
-      const role = roleFromDb(msgData.role);
-      if (!role) continue;
-
-      let text = "";
-      if (Array.isArray(msgData.content)) {
-        text = (msgData.content as Array<{ type?: string; text?: string }>)
-          .filter((c) => c && (c.type === "text" || c.type === "reasoning"))
-          .map((c) => c.text ?? "")
-          .join("");
-      }
-
-      if (!text && !msgData.tool_call_name && !msgData.name) continue;
-
-      entries.push({
-        role,
-        text: text || `(${msgData.tool_call_name || msgData.name || "unknown"})`,
-        tool: (msgData.tool_call_name as string) || (msgData.name as string),
-        timestamp: msgData.time ? (msgData.time as { created?: number }).created : undefined,
-      });
-
-      if (entries.length >= maxEntries) break;
-    }
-
-    return entries;
+    return buildEntriesFromRows(rows, maxEntries);
   } catch (e) {
     log.warn("db readHistorySince failed:", (e as Error).message);
     return [];
+  } finally {
+    db?.close();
+  }
+}
+
+function buildEntriesFromRows(
+  rows: { msg_id: string; msg_data: string; time_created: number; part_data: string | null }[],
+  maxEntries: number,
+): HistoryEntry[] {
+  const entries: HistoryEntry[] = [];
+  const seen = new Map<string, { role: string; texts: string[]; tool: string; ts: number }>();
+
+  // Collect text parts per message
+  for (const row of rows) {
+    let msg = seen.get(row.msg_id);
+    if (!msg) {
+      const msgData = parseJson(row.msg_data);
+      const role = roleFromDb(msgData?.role);
+      if (!role) continue;
+      msg = {
+        role,
+        texts: [],
+        tool: (msgData?.tool_call_name as string) || (msgData?.name as string) || "",
+        ts: row.time_created,
+      };
+      seen.set(row.msg_id, msg);
+    }
+
+    if (row.part_data) {
+      const partData = parseJson(row.part_data);
+      if (partData && typeof partData.text === "string") {
+        const partType = partData.type as string | undefined;
+        if (partType === "text" || partType === "reasoning" || !partType) {
+          msg.texts.push(partData.text);
+        }
+      }
+      // Store tool info from tool parts
+      if (partData?.type === "tool" && (partData.tool as Record<string, unknown>)?.name && !msg.tool) {
+        msg.tool = (partData.tool as Record<string, unknown>).name as string;
+      }
+    }
+  }
+
+  // Build entries from oldest to newest
+  const sorted = [...seen.entries()]
+    .sort(([, a], [, b]) => a.ts - b.ts);
+
+  for (const [, msg] of sorted) {
+    const text = msg.texts.join("");
+    if (!text && !msg.tool) continue;
+
+    entries.push({
+      role: msg.role as HistoryEntry["role"],
+      text: text || `(${msg.tool || "unknown"})`,
+      tool: msg.tool || undefined,
+      timestamp: msg.ts,
+    });
+
+    if (entries.length >= maxEntries) break;
+  }
+
+  return entries;
+}
+
+function readFirstPromptFromDb(dbPath: string, sessionId: string): string {
+  let db: Database | undefined;
+  try {
+    db = openDb(dbPath);
+    const rows = db.prepare(
+      `SELECT p.data as part_data
+       FROM message m
+       JOIN part p ON p.message_id = m.id
+       WHERE m.session_id = ?
+         AND json_extract(m.data, '$.role') = 'user'
+       ORDER BY m.time_created ASC, p.time_created ASC`,
+    ).all<{ part_data: string }>(sessionId);
+    if (!rows.length) return "";
+
+    const texts: string[] = [];
+    for (const row of rows) {
+      const partData = parseJson(row.part_data);
+      if (partData && partData.type === "text" && typeof partData.text === "string") {
+        texts.push(partData.text);
+      }
+    }
+    return texts.join("").trim();
+  } catch (e) {
+    log.warn("db readFirstPrompt failed:", (e as Error).message);
+    return "";
   } finally {
     db?.close();
   }
