@@ -89,7 +89,7 @@ export async function createBot(cfg: AppConfig, client: OpenCodeClient): Promise
   const store = new SessionStore(cfg.sessionsDir);
   const registry = new RuntimeRegistry(bot.api, client, cfg, settings, store);
   const tasks = new TaskStore(cfg.dataDir);
-  const taskRunner = new TaskRunner(bot.api, client);
+  const taskRunner = new TaskRunner(bot.api, client, cfg);
   const wizard = new TaskWizard(tasks);
   const statusPanel = new StatusPanel(bot.api, settings, registry);
   registry.setRefresher((chatId) => void statusPanel.refresh(chatId));
