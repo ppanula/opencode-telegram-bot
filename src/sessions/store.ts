@@ -128,14 +128,13 @@ export class SessionStore {
     let db: Database | undefined;
     try {
       db = openDb(this.dbPath);
-      const rows = db.all<DbSessionRow>(
+      const rows = db.prepare(
         `SELECT id, directory, title, agent, model, time_created, time_updated, time_archived
          FROM session
          WHERE time_archived IS NULL
          ORDER BY time_updated DESC
          LIMIT ?`,
-        [limit],
-      );
+      ).all<DbSessionRow>(limit);
       return rows.map((r) => this.rowToMeta(r, acpPid, running));
     } catch (e) {
       log.warn("db list failed:", (e as Error).message);
@@ -151,11 +150,10 @@ export class SessionStore {
     let db: Database | undefined;
     try {
       db = openDb(this.dbPath);
-      const row = db.get<DbSessionRow>(
+      const row = db.prepare(
         `SELECT id, directory, title, agent, model, time_created, time_updated, time_archived
          FROM session WHERE id = ?`,
-        [sessionId],
-      );
+      ).get<DbSessionRow>(sessionId);
       return row ? this.rowToMeta(row, acpPid, running) : undefined;
     } catch (e) {
       log.warn("db get failed:", (e as Error).message);
@@ -273,9 +271,12 @@ function fsAvailable(dir: string): boolean {
 // ── SQLite access ───────────────────────────────────────────────────────────
 
 interface Database {
-  all<T>(sql: string, params?: unknown[]): T[];
-  get<T>(sql: string, params?: unknown[]): T | undefined;
+  prepare(sql: string): Statement;
   close(): void;
+}
+interface Statement {
+  all<T>(...params: unknown[]): T[];
+  get<T>(...params: unknown[]): T | undefined;
 }
 
 function openDb(path: string): Database {
@@ -304,14 +305,13 @@ function readHistoryFromDb(
   let db: Database | undefined;
   try {
     db = openDb(dbPath);
-    const rows = db.all<{ data: string }>(
+    const rows = db.prepare(
       `SELECT m.data
        FROM message m
        WHERE m.session_id = ?
        ORDER BY m.time_created DESC
        LIMIT ?`,
-      [sessionId, maxEntries * 3],
-    );
+    ).all<{ data: string }>(sessionId, maxEntries * 3);
 
     const entries: HistoryEntry[] = [];
     for (let i = rows.length - 1; i >= 0; i--) {
@@ -354,14 +354,13 @@ function readFirstPromptFromDb(dbPath: string, sessionId: string): string {
   let db: Database | undefined;
   try {
     db = openDb(dbPath);
-    const row = db.get<{ data: string }>(
+    const row = db.prepare(
       `SELECT m.data FROM message m
        WHERE m.session_id = ?
          AND json_extract(m.data, '$.role') = 'user'
        ORDER BY m.time_created ASC
        LIMIT 1`,
-      [sessionId],
-    );
+    ).get<{ data: string }>(sessionId);
     if (!row) return "";
 
     const msgData = parseJson(row.data);
