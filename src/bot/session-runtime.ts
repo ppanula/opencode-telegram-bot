@@ -314,15 +314,19 @@ export class SessionRuntime {
   }
 
   private watchFromDb(sessionId: string): void {
-    let lastId = "";
-    const tick = 2000;
-    log.info(`watchFromDb starting for session ${sessionId.slice(0, 12)}`);
+    // First poll: dump the most recent history as context.
+    const recent = this.store.readHistory(sessionId, 30);
+    if (recent.length > 0) {
+      void this.onWatchEntries(recent);
+    }
+    const lastSeen = recent.length > 0 ? recent[recent.length - 1]!.timestamp ?? 0 : 0;
+    const tick = 3000;
+    let since = lastSeen;
+
     const timer = setInterval(() => {
-      const entries = this.store.readHistorySince(sessionId, lastId, 20);
+      const entries = this.store.readHistorySince(sessionId, String(since), 50);
       if (entries.length > 0) {
-        const prev = lastId;
-        lastId = entries[entries.length - 1]!.timestamp ? String(entries[entries.length - 1]!.timestamp) : lastId;
-        log.info(`watch: got ${entries.length} entries for ${sessionId.slice(0, 12)}`);
+        since = entries[entries.length - 1]!.timestamp ?? since;
         void this.onWatchEntries(entries);
       }
     }, tick);
