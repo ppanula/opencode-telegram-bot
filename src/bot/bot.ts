@@ -86,7 +86,12 @@ export async function createBot(cfg: AppConfig, client: OpenCodeClient): Promise
   }
 
   const settings = new SettingsStore(cfg.dataDir);
-  const store = new SessionStore(cfg.sessionsDir);
+  const store = new SessionStore(
+    cfg.sessionsDir,
+    cfg.openCodeDb,
+    () => client.pid,
+    () => new Set(client.runningSessions()),
+  );
   const registry = new RuntimeRegistry(bot.api, client, cfg, settings, store);
   const tasks = new TaskStore(cfg.dataDir);
   const taskRunner = new TaskRunner(bot.api, client);

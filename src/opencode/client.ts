@@ -658,6 +658,10 @@ export class OpenCodeClient extends EventEmitter {
   metadataFor(sessionId: string | undefined): SessionMetadata | undefined {
     return sessionId ? this.metadata.get(sessionId) : undefined;
   }
+  /** Session IDs currently running under this ACP agent. */
+  runningSessions(): string[] {
+    return [...this.running];
+  }
 
   // ── JSON-RPC plumbing ──────────────────────────────────────────────────────
 

@@ -10,7 +10,6 @@
 import { type Bot, type Context, InlineKeyboard } from "grammy";
 import { basename } from "node:path";
 import type { BotDeps } from "../deps.js";
-import { readHistory } from "../../sessions/history.js";
 import type { SessionMeta } from "../../sessions/types.js";
 import { refreshMenu } from "../menu/refresh.js";
 import { SESSION_ID } from "../session-id.js";
@@ -102,7 +101,7 @@ export function registerSessions(bot: Bot, deps: BotDeps): void {
     const fgCwd = deps.registry.get(ctx.chat!.id).cwd;
     const cwd = meta.cwd || fgCwd;
     const projectName = basename(meta.cwd || fgCwd) || "session";
-    const prior = readHistory(deps.store.jsonlPath(id), 24);
+    const prior = deps.store.readHistory(id, 24);
     try {
       const { result, alreadyControlled } = await deps.registry
         .controller(ctx.chat!.id)

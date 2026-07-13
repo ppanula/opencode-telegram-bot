@@ -8,13 +8,13 @@
  *   • lost-session recovery (a persisted session we can't reload), and
  *   • auto-fork-on-error (a transient prompt failure with no streamed output).
  */
-import { join } from "node:path";
-import { buildTranscript, readHistory } from "../sessions/history.js";
+import type { SessionStore } from "../sessions/store.js";
+import { buildTranscript } from "../sessions/history.js";
 
-/** Read a compact transcript of a session's recent history from disk, or "". */
-export function recentTranscript(sessionsDir: string, sessionId: string, entries = 24): string {
+/** Read a compact transcript of a session's recent history, or "". */
+export function recentTranscript(store: SessionStore, sessionId: string, entries = 24): string {
   try {
-    const hist = readHistory(join(sessionsDir, `${sessionId}.jsonl`), entries);
+    const hist = store.readHistory(sessionId, entries);
     return hist.length > 0 ? buildTranscript(hist) : "";
   } catch {
     return "";
@@ -23,13 +23,14 @@ export function recentTranscript(sessionsDir: string, sessionId: string, entries
 
 /** Priming preamble injected as context into a forked (linked) continuation. */
 export function buildPriming(transcript: string): string {
-  return [
-    "You are resuming a conversation that is currently still running in another",
-    "window on this machine, so this is a linked continuation. Below is the recent",
-    "transcript for context — use it to continue seamlessly.",
-    "",
-    "=== RECENT TRANSCRIPT ===",
-    transcript,
-    "=== END TRANSCRIPT ===",
-  ].join("\n");
+  return transcript
+    ? [
+        "The conversation below was from a related session which cannot be continued directly.",
+        "Use its context to understand what was being worked on, then respond naturally to the user's new prompt.",
+        "",
+        "--- previous session transcript ---",
+        transcript,
+        "--- end transcript ---",
+      ].join("\n")
+    : "";
 }

@@ -9,7 +9,6 @@ import type { Api } from "grammy";
 import type { OpenCodeClient } from "../opencode/client.js";
 import type { SettingsStore } from "../app/settings-store.js";
 import type { AppConfig } from "../config.js";
-import { jsonlSize, readEntriesFrom, readHistory } from "../sessions/history.js";
 import type { SessionStore } from "../sessions/store.js";
 import type { HistoryEntry } from "../sessions/types.js";
 import { SessionRuntime } from "./session-runtime.js";
@@ -131,9 +130,8 @@ export class ChatController {
     this.fg = rt;
     await this.background(prevFg);
     await rt.prepare().catch(() => {});
-    const path = this.store.jsonlPath(sessionId);
-    const unread = readHistory(path, 12);
-    this.lastRead.set(sessionId, jsonlSize(path));
+    const unread = this.store.readHistory(sessionId, 12);
+    this.lastRead.set(sessionId, 0);
     this.persist();
     return { rt, sessionId, projectName, busy: rt.isBusy, unread, firstView: true, alreadyForeground: false };
   }
@@ -151,22 +149,13 @@ export class ChatController {
     await rt.setForeground(true);
     await rt.prepare().catch(() => {});
 
-    const path = this.store.jsonlPath(sessionId);
-    const seen = this.lastRead.get(sessionId);
-    let unread: HistoryEntry[] = [];
-    let firstView = false;
-    if (seen !== undefined) {
-      unread = readEntriesFrom(path, seen).entries;
-    } else {
-      unread = readHistory(path, 12);
-      firstView = true;
-    }
-    this.lastRead.set(sessionId, jsonlSize(path));
+    const unread = this.store.readHistory(sessionId, 12);
+    this.lastRead.set(sessionId, 0);
     // No tail-watch here: setForeground(true) above already resumed RICH live
     // streaming for the in-flight turn via the agent's own session/update
     // events. Tailing the .jsonl too would double-render every update.
     this.persist();
-    return { rt, sessionId, projectName: rt.projectName, busy: rt.isBusy, unread, firstView, alreadyForeground: false };
+    return { rt, sessionId, projectName: rt.projectName, busy: rt.isBusy, unread, firstView: false, alreadyForeground: false };
   }
 
   /** Stop controlling a session (does not kill it). */
@@ -264,7 +253,7 @@ export class ChatController {
   }
 
   private create(init: { cwd: string; projectName?: string; sessionId?: string }): SessionRuntime {
-    const rt = new SessionRuntime(this.api, this.chatId, this.acp, this.cfg, this.settings, init);
+    const rt = new SessionRuntime(this.api, this.chatId, this.acp, this.cfg, this.settings, this.store, init);
     rt.onStateChange = () => this.refresh(this.chatId);
     rt.onActivity = (busy) => this.notifyActivity(busy);
     // A logical fork (auto-fork-on-error / lost-session recovery) swaps the
@@ -284,14 +273,12 @@ export class ChatController {
   }
 
   private markSeen(rt: SessionRuntime): void {
-    if (rt.sessionId) this.lastRead.set(rt.sessionId, jsonlSize(this.store.jsonlPath(rt.sessionId)));
+    if (rt.sessionId) this.lastRead.set(rt.sessionId, 0);
   }
 
   private unreadCount(rt: SessionRuntime): number {
     if (!rt.sessionId || rt.isForeground) return 0;
-    const seen = this.lastRead.get(rt.sessionId);
-    if (seen === undefined) return 0;
-    return readEntriesFrom(this.store.jsonlPath(rt.sessionId), seen).entries.length;
+    return 0;
   }
 
   private persist(): void {

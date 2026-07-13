@@ -19,6 +19,7 @@ import { PROGRESS_DIRECTIVE } from "../render/progress.js";
 import { SHELL_DIRECTIVE } from "../render/shell-directive.js";
 import { buildPriming, recentTranscript } from "./session-fork.js";
 import { TailWatcher } from "../sessions/tail.js";
+import type { SessionStore } from "../sessions/store.js";
 import type { HistoryEntry } from "../sessions/types.js";
 import { formatToolCall } from "../render/tool-call.js";
 import { type FileOp, fileOpFromUpdate, mergeFileOp, summarizeFileOps, summarizeFileOpsShort } from "../render/file-summary.js";
@@ -117,6 +118,7 @@ export class SessionRuntime {
     private readonly acp: OpenCodeClient,
     private readonly cfg: AppConfig,
     private readonly settings: SettingsStore,
+    private readonly store: SessionStore,
     init?: { cwd: string; projectName?: string; sessionId?: string },
   ) {
     if (init) {
@@ -486,7 +488,7 @@ export class SessionRuntime {
   /** Continue a session we could not reload by forking a fresh one primed with
    *  the lost session's recent transcript, so no context is dropped. */
   private async forkFromLostSession(lostId: string): Promise<void> {
-    const transcript = recentTranscript(this.cfg.sessionsDir, lostId);
+    const transcript = recentTranscript(this.store, lostId);
     log.warn(
       `chat ${this.chatId} could not reload ${lostId.slice(0, 8)}; forking a linked continuation` +
         (transcript ? " (primed with recent transcript)" : ""),
@@ -659,7 +661,7 @@ export class SessionRuntime {
     if (!isTransientAcpError(outcome.error) && !contextRelated) return undefined;
 
     const lostId = this.sessionId;
-    const transcript = recentTranscript(this.cfg.sessionsDir, lostId);
+    const transcript = recentTranscript(this.store, lostId);
     if (this.foreground) {
       const reason = contextRelated
         ? "That session's context looks full \u2014 compacting into a fresh continuation and retrying"

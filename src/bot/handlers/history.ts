@@ -4,7 +4,6 @@
 import type { Bot } from "grammy";
 import { basename } from "node:path";
 import type { BotDeps } from "../deps.js";
-import { readHistory } from "../../sessions/history.js";
 import { sessionHashtags } from "../../render/hashtags.js";
 import type { SessionMeta } from "../../sessions/types.js";
 import { sendMarkdownDoc } from "../telegram-io.js";
@@ -38,7 +37,7 @@ export async function showHistory(
   count = 16,
   tags?: string,
 ): Promise<void> {
-  const entries = readHistory(deps.store.jsonlPath(sessionId), count);
+  const entries = deps.store.readHistory(sessionId, count);
   if (entries.length === 0) {
     await deps.api.sendMessage(chatId, "No history found for this session yet.");
     return;

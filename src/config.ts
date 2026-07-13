@@ -145,6 +145,10 @@ export interface AppConfig {
    *  ghost/duplicate holding the lock is terminated so the fresh process (with
    *  the current `.env`) is the only Telegram getUpdates consumer. */
   singleInstance: boolean;
+  /** Path to the OpenCode sessions SQLite database (v1.17+). When the DB exists
+   *  and the legacy sessions/ directory does not, SessionStore reads from SQLite.
+   *  Default: ~/.local/share/opencode/opencode.db */
+  openCodeDb: string;
 }
 
 export function loadConfig(): AppConfig {
@@ -165,6 +169,9 @@ export function loadConfig(): AppConfig {
   }
 
   const sessionsDir = join(homedir(), ".local", "share", "opencode", "sessions");
+  const openCodeDbRaw = process.env.OPENCODE_SESSIONS_DB?.trim()
+    || join(homedir(), ".local", "share", "opencode", "opencode.db");
+  const openCodeDb = resolve(expandHome(openCodeDbRaw));
   const logsDir = process.env.LOG_DIR?.trim()
     ? resolve(expandHome(process.env.LOG_DIR.trim()))
     : join(INSTANCE_DIR, "logs");
@@ -191,6 +198,7 @@ export function loadConfig(): AppConfig {
     docMaxChars: nonNegNum(process.env.DOC_MAX_CHARS, 100_000),
     logLevel: process.env.LOG_LEVEL?.trim() || "info",
     sessionsDir,
+    openCodeDb,
     projectRoot: PROJECT_ROOT,
     logsDir,
     logFile,
