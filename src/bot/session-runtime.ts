@@ -34,7 +34,7 @@ import { TypingIndicator } from "./typing.js";
 
 const log = createLogger("runtime");
 
-const WATCH_ENTRY_MAX = 700;
+const WATCH_ENTRY_MAX = 3800;
 const WATCH_ICON: Record<string, string> = {
   user: "\u{1F464}",
   assistant: "\u{1F916}",
